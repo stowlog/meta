@@ -11,10 +11,6 @@ on:
         description: release-please release type (node, simple, etc.)
         type: string
         default: node
-      changelog-types:
-        description: JSON array string of extra conventional commit types for changelog
-        type: string
-        default: ''
     secrets:
       RELEASE_PLEASE_TOKEN:
         description: GitHub token with write permissions (falls back to GITHUB_TOKEN)
@@ -33,4 +29,3 @@ jobs:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           release-type: ${{ inputs.release-type }}
           target-branch: ${{ inputs.target-branch }}
-          changelog-types: ${{ inputs.changelog-types }}
