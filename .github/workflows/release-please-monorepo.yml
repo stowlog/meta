@@ -72,7 +72,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version }}
-          registry-url: https://registry.npmjs.org
+          # No registry-url on purpose: it writes an .npmrc with
+          # _authToken=${NODE_AUTH_TOKEN}, and with OIDC there is no such token.
+          # The unresolved placeholder is sent as a literal bearer token and the
+          # registry answers 404, so trusted publishing never runs.
 
       - name: Setup pnpm
         if: ${{ inputs.package-manager == 'pnpm' }}
