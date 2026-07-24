@@ -2,6 +2,14 @@
 
 Stowlog shared GitHub Actions workflows and configuration.
 
+## Organization rulesets
+
+Source of truth for org-level branch rulesets (apply via GitHub API / org settings — not auto-loaded from this path):
+
+| File | Purpose |
+|---|---|
+| [`.github/rulesets/protect-key-branches.json`](./.github/rulesets/protect-key-branches.json) | Protect default, `production`, and `release/**` across all repos |
+
 ## Reusable Workflows
 
 ### `release-please-standard.yml` — Independent repos
