@@ -108,9 +108,23 @@ jobs:
         if: ${{ inputs.build-command != '' }}
         run: ${{ inputs.build-command }}
 
+      # npm rejects a provenance bundle whose source repository is private:
+      # "Only public source repositories are supported when publishing with
+      # provenance" (HTTP 422). Detected rather than exposed as an input, so a
+      # repo that later goes public starts getting signatures with no change here.
+      - name: Resolve provenance flag
+        id: provenance
+        run: |
+          if [ "${{ github.event.repository.private }}" = "true" ]; then
+            echo "flag=" >> "$GITHUB_OUTPUT"
+            echo "Source repository is private — publishing without provenance."
+          else
+            echo "flag=--provenance" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish packages (pnpm)
         if: ${{ inputs.package-manager == 'pnpm' }}
-        run: pnpm publish -r --access public --no-git-checks --provenance
+        run: pnpm publish -r --access public --no-git-checks ${{ steps.provenance.outputs.flag }}
 
       - name: Publish packages (npm)
         if: ${{ inputs.package-manager == 'npm' }}
@@ -120,6 +134,6 @@ jobs:
           echo "$PATHS_RELEASED" | jq -r '.[]' | while read pkg_path; do
             echo "Publishing $pkg_path"
             cd "$pkg_path"
-            npm publish --access public --provenance
+            npm publish --access public ${{ steps.provenance.outputs.flag }}
             cd -
           done
