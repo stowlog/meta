@@ -91,6 +91,48 @@ jobs:
 
 ---
 
+### `vercel-deploy.yml` — Single deploy
+
+Pulls project settings + env vars from Vercel, builds, and deploys one environment (`preview` or `production`).
+
+**Usage** — copy to `.github/workflows/deploy.yml` in your repo:
+
+```yaml
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  preview:
+    if: github.event_name == 'push'
+    uses: stowlog/meta/.github/workflows/vercel-deploy.yml@main
+    secrets: inherit
+    with:
+      environment: preview
+
+  production:
+    if: github.event_name == 'workflow_dispatch'
+    uses: stowlog/meta/.github/workflows/vercel-release-deploy.yml@main
+    secrets: inherit
+```
+
+### `vercel-release-deploy.yml` — Release-gated production deploy
+
+Runs release-please, resolves the tag to deploy, and calls `vercel-deploy.yml` with `environment: production`. See [`docs/examples/`](./docs/examples/) for full callers, including a monorepo variant.
+
+> Manual-release flow: merge the release-please Release PR when ready, then run this workflow (`workflow_dispatch`) to promote it to production. Running it before merging just refreshes the Release PR — there's nothing to deploy yet.
+
+#### Vercel project setup
+
+- **Git integration off.** Disconnect Git in Vercel Project Settings, or set the Ignored Build Step to `exit 0` — otherwise every push also triggers an uncontrolled Vercel deployment that races this workflow.
+- **Secrets.** Org secrets `VERCEL_TOKEN`, `VERCEL_ORG_ID`; repo secret `VERCEL_PROJECT_ID`.
+- **Env vars live in Vercel, not GitHub.** These workflows use `vercel pull` to fetch build-time env vars and project settings straight from the Vercel project per environment, so `vercel build` matches what Vercel itself would build — a var that only exists in GitHub secrets will be missing at build time.
+
+---
+
 ## Reference
 
 ### `release-please-standard.yml`
@@ -126,6 +168,69 @@ jobs:
 | Secret | Description |
 |---|---|
 | `RELEASE_PLEASE_TOKEN` | GitHub token with write permissions (falls back to GITHUB_TOKEN) |
+
+### `vercel-deploy.yml`
+
+#### Inputs
+
+| Input | Type | Default | Description |
+|---|---|---|---|
+| `environment` | string | *(required)* | `preview` or `production` |
+| `vercel-target` | string | `''` | Custom Vercel environment name (overrides `--target`) |
+| `ref` | string | `''` | Git ref to check out and deploy; empty uses the caller's ref |
+| `working-directory` | string | `.` | Directory containing the Vercel project (monorepo app path) |
+| `node-version` | string | `24` | Node.js version |
+| `install-command` | string | `pnpm install --frozen-lockfile` | Skipped if empty |
+| `vercel-cli-version` | string | `latest` | Vercel CLI version to install |
+| `deploy-args` | string | `''` | Extra args appended to `vercel deploy` |
+| `extra-env` | string | `''` | Newline-separated `KEY=VALUE` pairs exported before build (non-secret only) |
+| `github-environment` | string | `''` | GitHub environment for the deploy job; defaults to `environment` |
+
+#### Secrets
+
+| Secret | Description |
+|---|---|
+| `VERCEL_TOKEN` | Vercel access token (required) |
+| `VERCEL_ORG_ID` | Vercel organization (team) ID |
+| `VERCEL_PROJECT_ID` | Vercel project ID |
+
+#### Outputs
+
+| Output | Description |
+|---|---|
+| `deployment-url` | URL of the created deployment |
+
+### `vercel-release-deploy.yml`
+
+#### Inputs
+
+| Input | Type | Default | Description |
+|---|---|---|---|
+| `release-mode` | string | `latest-tag` | `latest-tag` (deploy newest GitHub Release) or `head` (deploy target-branch HEAD) |
+| `target-branch` | string | `main` | Branch release-please tracks |
+| `release-type` | string | `node` | release-please release type |
+| `ref` | string | `''` | Explicit ref/tag to deploy (rollback); overrides `release-mode` resolution |
+| `working-directory` | string | `.` | Directory containing the Vercel project |
+| `node-version` | string | `24` | Node.js version |
+| `install-command` | string | `pnpm install --frozen-lockfile` | Skipped if empty |
+| `deploy-args` | string | `''` | Extra args appended to `vercel deploy` |
+| `github-environment` | string | `production` | GitHub environment for the production deploy job |
+
+#### Secrets
+
+| Secret | Description |
+|---|---|
+| `VERCEL_TOKEN` | Vercel access token (required) |
+| `VERCEL_ORG_ID` | Vercel organization (team) ID |
+| `VERCEL_PROJECT_ID` | Vercel project ID |
+| `RELEASE_PLEASE_TOKEN` | GitHub token with write permissions (falls back to GITHUB_TOKEN) |
+
+#### Outputs
+
+| Output | Description |
+|---|---|
+| `deployment-url` | URL of the created production deployment |
+| `deployed-ref` | Ref/tag that was deployed |
 
 ---
 
