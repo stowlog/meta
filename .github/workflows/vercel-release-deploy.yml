@@ -1,0 +1,120 @@
+name: Vercel Release Deploy
+
+on:
+  workflow_call:
+    inputs:
+      release-mode:
+        description: latest-tag (deploy newest GitHub Release) or head (deploy target-branch HEAD)
+        type: string
+        default: latest-tag
+      target-branch:
+        description: Branch release-please tracks
+        type: string
+        default: main
+      release-type:
+        description: release-please release type
+        type: string
+        default: node
+      ref:
+        description: Explicit ref/tag to deploy (rollback). Overrides release-mode resolution.
+        type: string
+        default: ""
+      working-directory:
+        description: Directory containing the Vercel project
+        type: string
+        default: "."
+      node-version:
+        type: string
+        default: "24"
+      install-command:
+        type: string
+        default: "pnpm install --frozen-lockfile"
+      deploy-args:
+        type: string
+        default: ""
+      github-environment:
+        description: GitHub environment for the production deploy job
+        type: string
+        default: production
+    secrets:
+      RELEASE_PLEASE_TOKEN:
+        required: false
+      VERCEL_TOKEN:
+        required: true
+      VERCEL_ORG_ID:
+        required: false
+      VERCEL_PROJECT_ID:
+        required: false
+    outputs:
+      deployment-url:
+        value: ${{ jobs.deploy.outputs.deployment-url }}
+      deployed-ref:
+        value: ${{ jobs.resolve.outputs.ref }}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          release-type: ${{ inputs.release-type }}
+          target-branch: ${{ inputs.target-branch }}
+
+  resolve:
+    needs: release-please
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.pick.outputs.ref }}
+    steps:
+      - name: Pick the ref to deploy
+        id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.ref }}" ]; then
+            echo "ref=${{ inputs.ref }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "${{ needs.release-please.outputs.release_created }}" = "true" ]; then
+            echo "ref=${{ needs.release-please.outputs.tag_name }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "${{ inputs.release-mode }}" in
+            head)
+              echo "ref=${{ inputs.target-branch }}" >> "$GITHUB_OUTPUT"
+              ;;
+            latest-tag)
+              tag=$(gh release view --json tagName --jq .tagName 2>/dev/null || true)
+              if [ -z "$tag" ]; then
+                echo "::error::No GitHub Release found. Merge the release-please Release PR first, or call this workflow with release-mode: head."
+                exit 1
+              fi
+              echo "ref=$tag" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::release-mode must be 'latest-tag' or 'head'"; exit 1 ;;
+          esac
+
+  deploy:
+    needs: resolve
+    uses: ./.github/workflows/vercel-deploy.yml
+    secrets: inherit
+    with:
+      environment: production
+      ref: ${{ needs.resolve.outputs.ref }}
+      working-directory: ${{ inputs.working-directory }}
+      node-version: ${{ inputs.node-version }}
+      install-command: ${{ inputs.install-command }}
+      deploy-args: ${{ inputs.deploy-args }}
+      github-environment: ${{ inputs.github-environment }}
