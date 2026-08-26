@@ -99,6 +99,11 @@ jobs:
         with:
           run_install: false
 
+      - name: Configure pnpm global bin dir
+        run: |
+          echo "PNPM_HOME=$HOME/.local/share/pnpm" >> "$GITHUB_ENV"
+          echo "$HOME/.local/share/pnpm" >> "$GITHUB_PATH"
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
