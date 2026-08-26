@@ -45,6 +45,8 @@ on:
         required: false
       VERCEL_PROJECT_ID:
         required: false
+      HEROUI_AUTH_TOKEN:
+        required: false
     outputs:
       deployment-url:
         value: ${{ jobs.deploy.outputs.deployment-url }}
