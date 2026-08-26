@@ -1,0 +1,147 @@
+name: Vercel Deploy
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: Vercel environment to deploy (preview or production)
+        type: string
+        required: true
+      vercel-target:
+        description: Custom Vercel environment name (overrides environment for --target). Empty for standard preview/production.
+        type: string
+        default: ""
+      ref:
+        description: Git ref to check out and deploy. Empty uses the caller's ref.
+        type: string
+        default: ""
+      working-directory:
+        description: Directory containing the Vercel project (monorepo app path)
+        type: string
+        default: "."
+      node-version:
+        description: Node.js version
+        type: string
+        default: "24"
+      install-command:
+        description: Dependency install command. Skipped if empty.
+        type: string
+        default: "pnpm install --frozen-lockfile"
+      vercel-cli-version:
+        description: Version of the Vercel CLI to install
+        type: string
+        default: "latest"
+      deploy-args:
+        description: Extra args appended to 'vercel deploy'
+        type: string
+        default: ""
+      extra-env:
+        description: Newline-separated KEY=VALUE pairs exported before the build. Non-secret only.
+        type: string
+        default: ""
+      github-environment:
+        description: GitHub environment for the deploy job. Defaults to the value of 'environment'.
+        type: string
+        default: ""
+    secrets:
+      VERCEL_TOKEN:
+        description: Vercel access token
+        required: true
+      VERCEL_ORG_ID:
+        description: Vercel organization (team) ID
+        required: false
+      VERCEL_PROJECT_ID:
+        description: Vercel project ID
+        required: false
+    outputs:
+      deployment-url:
+        description: URL of the created deployment
+        value: ${{ jobs.deploy.outputs.deployment-url }}
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.github-environment || inputs.environment }}
+      url: ${{ steps.deploy.outputs.url }}
+    outputs:
+      deployment-url: ${{ steps.deploy.outputs.url }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      TURBO_TELEMETRY_DISABLED: "1"
+      VERCEL_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Validate environment input
+        run: |
+          case "${{ inputs.environment }}" in
+            preview|production) ;;
+            *) echo "::error::environment must be 'preview' or 'production'"; exit 1 ;;
+          esac
+
+      - uses: pnpm/action-setup@v5
+        with:
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: pnpm
+
+      - name: Install dependencies
+        if: ${{ inputs.install-command != '' }}
+        run: ${{ inputs.install-command }}
+
+      - name: Install Vercel CLI
+        run: pnpm add -g vercel@${{ inputs.vercel-cli-version }}
+
+      - name: Export extra env
+        if: ${{ inputs.extra-env != '' }}
+        run: |
+          printf '%s\n' "${{ inputs.extra-env }}" | while IFS= read -r line; do
+            [ -n "$line" ] && echo "$line" >> "$GITHUB_ENV"
+          done
+
+      # Pulls project settings AND environment variables for this environment
+      # into .vercel/, so 'vercel build' matches what Vercel itself would build.
+      - name: Pull Vercel environment
+        run: vercel pull --yes --environment=${{ inputs.environment }} --token="$VERCEL_TOKEN"
+
+      - name: Build
+        run: vercel build ${{ inputs.environment == 'production' && '--prod' || '' }} --token="$VERCEL_TOKEN"
+
+      - name: Deploy
+        id: deploy
+        run: |
+          set -euo pipefail
+          TARGET_FLAG=""
+          if [ -n "${{ inputs.vercel-target }}" ]; then
+            TARGET_FLAG="--target=${{ inputs.vercel-target }}"
+          elif [ "${{ inputs.environment }}" = "production" ]; then
+            TARGET_FLAG="--prod"
+          fi
+          url=$(vercel deploy --prebuilt $TARGET_FLAG ${{ inputs.deploy-args }} --token="$VERCEL_TOKEN")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Deployed to $url"
+
+      - name: Job summary
+        run: |
+          {
+            echo "### Vercel ${{ inputs.environment }} deployment"
+            echo
+            echo "- ref: \`${{ inputs.ref || github.ref_name }}\`"
+            echo "- url: ${{ steps.deploy.outputs.url }}"
+          } >> "$GITHUB_STEP_SUMMARY"
