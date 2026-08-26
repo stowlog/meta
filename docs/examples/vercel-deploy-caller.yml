@@ -1,0 +1,40 @@
+# Copy to .github/workflows/deploy.yml in a Vercel app repo
+#
+# Prerequisites:
+#   - Vercel Git integration DISABLED for the project (Settings > Git > disconnect,
+#     or set the Ignored Build Step to `exit 0`) — otherwise every push deploys twice
+#   - Org secrets: VERCEL_TOKEN, VERCEL_ORG_ID
+#   - Repo secret:  VERCEL_PROJECT_ID
+#   - All build-time env vars set in the Vercel project (Preview + Production)
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Tag to deploy (leave empty for the latest release)
+        type: string
+        required: false
+
+concurrency:
+  group: deploy-${{ github.event_name == 'workflow_dispatch' && 'production' || 'preview' }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  preview:
+    if: github.event_name == 'push'
+    uses: stowlog/meta/.github/workflows/vercel-deploy.yml@main
+    secrets: inherit
+    with:
+      environment: preview
+
+  production:
+    if: github.event_name == 'workflow_dispatch'
+    uses: stowlog/meta/.github/workflows/vercel-release-deploy.yml@main
+    secrets: inherit
+    with:
+      ref: ${{ inputs.ref }}
+      # release-mode: latest-tag   # default; use 'head' to skip release gating
