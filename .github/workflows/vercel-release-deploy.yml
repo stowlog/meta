@@ -3,22 +3,10 @@ name: Vercel Release Deploy
 on:
   workflow_call:
     inputs:
-      release-mode:
-        description: latest-tag (deploy newest GitHub Release) or head (deploy target-branch HEAD)
-        type: string
-        default: latest-tag
-      target-branch:
-        description: Branch release-please tracks
-        type: string
-        default: main
-      release-type:
-        description: release-please release type
-        type: string
-        default: node
       ref:
-        description: Explicit ref/tag to deploy (rollback). Overrides release-mode resolution.
+        description: Git tag to deploy — from the release event (github.event.release.tag_name) or an explicit tag for rollback
         type: string
-        default: ""
+        required: true
       working-directory:
         description: Directory containing the Vercel project
         type: string
@@ -37,8 +25,6 @@ on:
         type: string
         default: production
     secrets:
-      RELEASE_PLEASE_TOKEN:
-        required: false
       VERCEL_TOKEN:
         required: true
       VERCEL_ORG_ID:
@@ -50,123 +36,18 @@ on:
     outputs:
       deployment-url:
         value: ${{ jobs.deploy.outputs.deployment-url }}
-      deployed-ref:
-        value: ${{ jobs.resolve.outputs.ref }}
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
   deployments: write
 
 jobs:
-  # Skipped for rollback deploys (inputs.ref set) — no need to touch release-please then.
-  release-please:
-    if: ${{ inputs.ref == '' }}
-    runs-on: ubuntu-latest
-    outputs:
-      release_created: ${{ steps.finalize.outputs.release_created }}
-      tag_name: ${{ steps.finalize.outputs.tag_name }}
-    steps:
-      - uses: googleapis/release-please-action@v4
-        id: release
-        with:
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
-          release-type: ${{ inputs.release-type }}
-          target-branch: ${{ inputs.target-branch }}
-
-      # release-please is two-phase: this run either opened/updated the version-bump
-      # PR, or (if that PR was already merged) just cut the tag+release above. When it
-      # only opened the PR, merge it ourselves so one manual trigger does both steps —
-      # requires the release-please actor to be a ruleset bypass_actor for pull_request
-      # review (see meta/README.md, .github/rulesets/protect-key-branches.json).
-      - name: Auto-merge pending release PR
-        if: ${{ steps.release.outputs.release_created != 'true' }}
-        id: automerge
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          pr=$(gh pr list --state open --base "${{ inputs.target-branch }}" \
-                 --search 'label:"autorelease: pending"' --json number --jq '.[0].number')
-          if [ -z "$pr" ]; then
-            echo "No pending release PR — nothing to release."
-            echo "merged=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          echo "Waiting for required checks on PR #$pr"
-          gh pr checks "$pr" --watch --fail-fast
-          echo "Merging release PR #$pr"
-          gh pr merge "$pr" --squash --delete-branch
-          echo "merged=true" >> "$GITHUB_OUTPUT"
-
-      - name: Cut tag + GitHub Release now that the version bump landed
-        if: ${{ steps.automerge.outputs.merged == 'true' }}
-        id: release2
-        uses: googleapis/release-please-action@v4
-        with:
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
-          release-type: ${{ inputs.release-type }}
-          target-branch: ${{ inputs.target-branch }}
-
-      - name: Finalize outputs
-        id: finalize
-        run: |
-          if [ "${{ steps.release2.outputs.release_created }}" = "true" ]; then
-            echo "release_created=true" >> "$GITHUB_OUTPUT"
-            echo "tag_name=${{ steps.release2.outputs.tag_name }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "release_created=${{ steps.release.outputs.release_created }}" >> "$GITHUB_OUTPUT"
-            echo "tag_name=${{ steps.release.outputs.tag_name }}" >> "$GITHUB_OUTPUT"
-          fi
-
-  resolve:
-    needs: release-please
-    # release-please job is skipped for rollback deploys — don't let that skip cascade
-    # into resolve, but still hard-stop if it actually failed.
-    if: ${{ !cancelled() && needs.release-please.result != 'failure' }}
-    runs-on: ubuntu-latest
-    outputs:
-      ref: ${{ steps.pick.outputs.ref }}
-    steps:
-      - name: Pick the ref to deploy
-        id: pick
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          if [ -n "${{ inputs.ref }}" ]; then
-            echo "ref=${{ inputs.ref }}" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [ "${{ needs.release-please.outputs.release_created }}" = "true" ]; then
-            echo "ref=${{ needs.release-please.outputs.tag_name }}" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          case "${{ inputs.release-mode }}" in
-            head)
-              echo "ref=${{ inputs.target-branch }}" >> "$GITHUB_OUTPUT"
-              ;;
-            latest-tag)
-              tag=$(gh release view --json tagName --jq .tagName 2>/dev/null || true)
-              if [ -z "$tag" ]; then
-                echo "::error::No GitHub Release found. Merge the release-please Release PR first, or call this workflow with release-mode: head."
-                exit 1
-              fi
-              echo "ref=$tag" >> "$GITHUB_OUTPUT"
-              ;;
-            *)
-              echo "::error::release-mode must be 'latest-tag' or 'head'"; exit 1 ;;
-          esac
-
   deploy:
-    needs: resolve
     uses: ./.github/workflows/vercel-deploy.yml
     secrets: inherit
     with:
       environment: production
-      ref: ${{ needs.resolve.outputs.ref }}
+      ref: ${{ inputs.ref }}
       working-directory: ${{ inputs.working-directory }}
       node-version: ${{ inputs.node-version }}
       install-command: ${{ inputs.install-command }}

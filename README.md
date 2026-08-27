@@ -11,9 +11,10 @@ Source of truth for org-level branch rulesets (apply via GitHub API / org settin
 | [`.github/rulesets/protect-key-branches.json`](./.github/rulesets/protect-key-branches.json) | Protect default, `production`, and `release/**` across all repos |
 
 The second `bypass_actors` entry (`actor_type: "Team"`, `actor_id: 0`) is a placeholder for the
-identity behind the `RELEASE_PLEASE_TOKEN` secret — needed so `vercel-release-deploy.yml`'s
-`release-please` job can auto-merge its own version-bump PR (single manual trigger does
-release + deploy). Setup, once per org:
+identity behind the `RELEASE_PLEASE_TOKEN` secret — needed so `release-please-standard.yml` /
+`release-please-monorepo.yml` can push the Release PR's version-bump commits, and once a human
+merges that PR, push the resulting tag and GitHub Release to protected branches. Setup, once per
+org:
 
 1. Create a machine/bot GitHub user (or GitHub App) dedicated to release automation.
 2. Generate a fine-grained PAT for it (repo contents + pull-requests: write) and store it as
@@ -23,9 +24,6 @@ release + deploy). Setup, once per org:
    the real numeric `actor_id`, replacing the `0` placeholder here.
 5. `bypass_mode: "pull_request"` means the bypass only applies when merging via a pull request
    (as `gh pr merge` does) — never on a direct push to the branch.
-
-Bypassing this ruleset skips the *review* requirement only in practice, because the workflow
-itself still waits on `lint`/`test`/`build` (`gh pr checks --watch --fail-fast`) before merging.
 
 ## Reusable Workflows
 
@@ -120,7 +118,14 @@ name: Deploy
 on:
   push:
     branches: [main]
+  release:
+    types: [published]
   workflow_dispatch:
+    inputs:
+      ref:
+        description: Existing tag to redeploy (rollback only)
+        type: string
+        required: true
 
 jobs:
   preview:
@@ -131,16 +136,23 @@ jobs:
       environment: preview
 
   production:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     uses: stowlog/meta/.github/workflows/vercel-release-deploy.yml@main
     secrets: inherit
+    with:
+      ref: ${{ github.event.release.tag_name || inputs.ref }}
 ```
 
 ### `vercel-release-deploy.yml` — Release-gated production deploy
 
-Runs release-please, resolves the tag to deploy, and calls `vercel-deploy.yml` with `environment: production`. See [`docs/examples/`](./docs/examples/) for full callers, including a monorepo variant.
+Thin wrapper around `vercel-deploy.yml` that pins `environment: production`. Carries no
+release-please logic of its own — the caller resolves `ref` (from the release event, or an
+explicit tag for a rollback) and passes it in. See [`docs/examples/`](./docs/examples/) for full
+callers, including a monorepo variant.
 
-> Manual-release flow: merge the release-please Release PR when ready, then run this workflow (`workflow_dispatch`) to promote it to production. Running it before merging just refreshes the Release PR — there's nothing to deploy yet.
+> Release flow: `release-please-standard.yml`/`release-please-monorepo.yml` (on push to `main`)
+> opens/updates the Release PR. A human merges it when ready — release-please then cuts the tag
+> and GitHub Release, which fires the `release: published` event and triggers this workflow.
 
 #### Vercel project setup
 
@@ -223,10 +235,7 @@ Runs release-please, resolves the tag to deploy, and calls `vercel-deploy.yml` w
 
 | Input | Type | Default | Description |
 |---|---|---|---|
-| `release-mode` | string | `latest-tag` | `latest-tag` (deploy newest GitHub Release) or `head` (deploy target-branch HEAD) |
-| `target-branch` | string | `main` | Branch release-please tracks |
-| `release-type` | string | `node` | release-please release type |
-| `ref` | string | `''` | Explicit ref/tag to deploy (rollback); overrides `release-mode` resolution |
+| `ref` | string | *(required)* | Git tag to deploy — from the release event, or an explicit tag for rollback |
 | `working-directory` | string | `.` | Directory containing the Vercel project |
 | `node-version` | string | `24` | Node.js version |
 | `install-command` | string | `pnpm install --frozen-lockfile` | Skipped if empty |
@@ -240,14 +249,12 @@ Runs release-please, resolves the tag to deploy, and calls `vercel-deploy.yml` w
 | `VERCEL_TOKEN` | Vercel access token (required) |
 | `VERCEL_ORG_ID` | Vercel organization (team) ID |
 | `VERCEL_PROJECT_ID` | Vercel project ID |
-| `RELEASE_PLEASE_TOKEN` | GitHub token with write permissions (falls back to GITHUB_TOKEN) |
 
 #### Outputs
 
 | Output | Description |
 |---|---|
 | `deployment-url` | URL of the created production deployment |
-| `deployed-ref` | Ref/tag that was deployed |
 
 ---
 
