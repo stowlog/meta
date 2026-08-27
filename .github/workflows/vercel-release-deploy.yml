@@ -59,11 +59,13 @@ permissions:
   deployments: write
 
 jobs:
+  # Skipped for rollback deploys (inputs.ref set) — no need to touch release-please then.
   release-please:
+    if: ${{ inputs.ref == '' }}
     runs-on: ubuntu-latest
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
+      release_created: ${{ steps.finalize.outputs.release_created }}
+      tag_name: ${{ steps.finalize.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
@@ -72,8 +74,57 @@ jobs:
           release-type: ${{ inputs.release-type }}
           target-branch: ${{ inputs.target-branch }}
 
+      # release-please is two-phase: this run either opened/updated the version-bump
+      # PR, or (if that PR was already merged) just cut the tag+release above. When it
+      # only opened the PR, merge it ourselves so one manual trigger does both steps —
+      # requires the release-please actor to be a ruleset bypass_actor for pull_request
+      # review (see meta/README.md, .github/rulesets/protect-key-branches.json).
+      - name: Auto-merge pending release PR
+        if: ${{ steps.release.outputs.release_created != 'true' }}
+        id: automerge
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          pr=$(gh pr list --state open --base "${{ inputs.target-branch }}" \
+                 --search 'label:"autorelease: pending"' --json number --jq '.[0].number')
+          if [ -z "$pr" ]; then
+            echo "No pending release PR — nothing to release."
+            echo "merged=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Waiting for required checks on PR #$pr"
+          gh pr checks "$pr" --watch --fail-fast
+          echo "Merging release PR #$pr"
+          gh pr merge "$pr" --squash --delete-branch
+          echo "merged=true" >> "$GITHUB_OUTPUT"
+
+      - name: Cut tag + GitHub Release now that the version bump landed
+        if: ${{ steps.automerge.outputs.merged == 'true' }}
+        id: release2
+        uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          release-type: ${{ inputs.release-type }}
+          target-branch: ${{ inputs.target-branch }}
+
+      - name: Finalize outputs
+        id: finalize
+        run: |
+          if [ "${{ steps.release2.outputs.release_created }}" = "true" ]; then
+            echo "release_created=true" >> "$GITHUB_OUTPUT"
+            echo "tag_name=${{ steps.release2.outputs.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "release_created=${{ steps.release.outputs.release_created }}" >> "$GITHUB_OUTPUT"
+            echo "tag_name=${{ steps.release.outputs.tag_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
   resolve:
     needs: release-please
+    # release-please job is skipped for rollback deploys — don't let that skip cascade
+    # into resolve, but still hard-stop if it actually failed.
+    if: ${{ !cancelled() && needs.release-please.result != 'failure' }}
     runs-on: ubuntu-latest
     outputs:
       ref: ${{ steps.pick.outputs.ref }}

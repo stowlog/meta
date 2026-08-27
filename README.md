@@ -10,6 +10,23 @@ Source of truth for org-level branch rulesets (apply via GitHub API / org settin
 |---|---|
 | [`.github/rulesets/protect-key-branches.json`](./.github/rulesets/protect-key-branches.json) | Protect default, `production`, and `release/**` across all repos |
 
+The second `bypass_actors` entry (`actor_type: "Team"`, `actor_id: 0`) is a placeholder for the
+identity behind the `RELEASE_PLEASE_TOKEN` secret — needed so `vercel-release-deploy.yml`'s
+`release-please` job can auto-merge its own version-bump PR (single manual trigger does
+release + deploy). Setup, once per org:
+
+1. Create a machine/bot GitHub user (or GitHub App) dedicated to release automation.
+2. Generate a fine-grained PAT for it (repo contents + pull-requests: write) and store it as
+   the `RELEASE_PLEASE_TOKEN` org secret.
+3. Add that account to a team (e.g. `release-bots`).
+4. In the GitHub ruleset editor's Bypass list, search for that team and add it — this fills in
+   the real numeric `actor_id`, replacing the `0` placeholder here.
+5. `bypass_mode: "pull_request"` means the bypass only applies when merging via a pull request
+   (as `gh pr merge` does) — never on a direct push to the branch.
+
+Bypassing this ruleset skips the *review* requirement only in practice, because the workflow
+itself still waits on `lint`/`test`/`build` (`gh pr checks --watch --fail-fast`) before merging.
+
 ## Reusable Workflows
 
 ### `release-please-standard.yml` — Independent repos
