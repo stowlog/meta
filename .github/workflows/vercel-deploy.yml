@@ -4,7 +4,7 @@ on:
   workflow_call:
     inputs:
       environment:
-        description: Vercel environment to deploy (preview or production)
+        description: Vercel environment to deploy (`preview`, `staging` or `production`)
         type: string
         required: true
       vercel-target:
@@ -91,8 +91,8 @@ jobs:
       - name: Validate environment input
         run: |
           case "${{ inputs.environment }}" in
-            preview|production) ;;
-            *) echo "::error::environment must be 'preview' or 'production'"; exit 1 ;;
+            preview|production|staging) ;;
+            *) echo "::error::environment must be 'preview', 'staging' or 'production'"; exit 1 ;;
           esac
 
       - uses: pnpm/action-setup@v5
