@@ -129,11 +129,8 @@ jobs:
       - name: Pull Vercel environment
         run: vercel pull --yes --environment=${{ inputs.environment }} --token="$VERCEL_TOKEN"
 
-      - name: Build
-        run: vercel build ${{ inputs.environment == 'production' && '--prod' || '' }} --token="$VERCEL_TOKEN"
-
-      - name: Deploy
-        id: deploy
+      - name: Resolve Vercel target
+        id: target
         run: |
           set -euo pipefail
           TARGET_FLAG=""
@@ -142,7 +139,20 @@ jobs:
           elif [ "${{ inputs.environment }}" = "production" ]; then
             TARGET_FLAG="--prod"
           fi
-          url=$(vercel deploy --prebuilt $TARGET_FLAG ${{ inputs.deploy-args }} --token="$VERCEL_TOKEN")
+          echo "flag=$TARGET_FLAG" >> "$GITHUB_OUTPUT"
+
+      # `vercel build` reads env vars from the `.vercel/.env.<target>.local` file
+      # written by the Pull step above — without the matching --target/--prod
+      # flag it silently falls back to `.env.preview.local`, so any custom
+      # environment's vars (e.g. staging) never make it into the build.
+      - name: Build
+        run: vercel build ${{ steps.target.outputs.flag }} --token="$VERCEL_TOKEN"
+
+      - name: Deploy
+        id: deploy
+        run: |
+          set -euo pipefail
+          url=$(vercel deploy --prebuilt ${{ steps.target.outputs.flag }} ${{ inputs.deploy-args }} --token="$VERCEL_TOKEN")
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployed to $url"
 
