@@ -24,6 +24,10 @@ on:
         description: GitHub environment for the production deploy job
         type: string
         default: production
+      production-url:
+        description: Fixed production URL to show in the job summary (e.g. a custom domain)
+        type: string
+        default: ""
     secrets:
       VERCEL_TOKEN:
         required: true
@@ -53,3 +57,4 @@ jobs:
       install-command: ${{ inputs.install-command }}
       deploy-args: ${{ inputs.deploy-args }}
       github-environment: ${{ inputs.github-environment }}
+      production-url: ${{ inputs.production-url }}

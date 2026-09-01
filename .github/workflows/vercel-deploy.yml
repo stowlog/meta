@@ -43,6 +43,18 @@ on:
         description: GitHub environment for the deploy job. Defaults to the value of 'environment'.
         type: string
         default: ""
+      production-url:
+        description: Fixed production URL to show in the job summary (e.g. a custom domain)
+        type: string
+        default: ""
+      preview-url:
+        description: Fixed preview URL to show in the job summary (e.g. a custom domain)
+        type: string
+        default: ""
+      staging-url:
+        description: Fixed staging URL to show in the job summary (e.g. a custom domain)
+        type: string
+        default: ""
     secrets:
       VERCEL_TOKEN:
         description: Vercel access token
@@ -84,7 +96,7 @@ jobs:
       TURBO_TELEMETRY_DISABLED: "1"
       VERCEL_TELEMETRY_DISABLED: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.ref || github.ref }}
 
@@ -105,7 +117,7 @@ jobs:
           echo "$HOME/.local/share/pnpm/bin" >> "$GITHUB_PATH"
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ inputs.node-version }}
           cache: pnpm
@@ -157,10 +169,15 @@ jobs:
           echo "Deployed to $url"
 
       - name: Job summary
+        env:
+          ENVIRONMENT_URL: ${{ inputs.environment == 'production' && inputs.production-url || inputs.environment == 'staging' && inputs.staging-url || inputs.environment == 'preview' && inputs.preview-url }}
         run: |
           {
             echo "### Vercel ${{ inputs.environment }} deployment"
             echo
             echo "- ref: \`${{ inputs.ref || github.ref_name }}\`"
             echo "- url: ${{ steps.deploy.outputs.url }}"
+            if [ -n "$ENVIRONMENT_URL" ]; then
+              echo "- ${{ inputs.environment }} url: $ENVIRONMENT_URL"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
