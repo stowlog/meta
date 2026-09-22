@@ -17,6 +17,14 @@ on:
       install-command:
         type: string
         default: "pnpm install --frozen-lockfile"
+      vercel-cli-version:
+        description: Version of the Vercel CLI to install
+        type: string
+        default: "latest"
+      cache-node-modules:
+        description: Cache node_modules between runs, keyed on the lockfile
+        type: boolean
+        default: false
       deploy-args:
         type: string
         default: ""
@@ -55,6 +63,8 @@ jobs:
       working-directory: ${{ inputs.working-directory }}
       node-version: ${{ inputs.node-version }}
       install-command: ${{ inputs.install-command }}
+      vercel-cli-version: ${{ inputs.vercel-cli-version }}
+      cache-node-modules: ${{ inputs.cache-node-modules }}
       deploy-args: ${{ inputs.deploy-args }}
       github-environment: ${{ inputs.github-environment }}
       production-url: ${{ inputs.production-url }}
