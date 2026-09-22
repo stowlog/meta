@@ -133,15 +133,22 @@ jobs:
           cache: pnpm
 
       # Globbed so pnpm workspaces get their per-package node_modules too, not
-      # just the root one. No restore-keys: a partial restore would leave a
-      # node_modules tree that doesn't match the lockfile.
+      # just the root one, but `.vercel` is excluded: `vercel build` unpacks
+      # pnpm into .vercel/cache/corepack, that package ships node_modules
+      # directories of its own, and restoring them on a later run recreates the
+      # corepack version directory without its entry point, so the build fails
+      # with "Cannot find module .../bin/pnpm.mjs".
+      # No restore-keys: a partial restore would leave a node_modules tree that
+      # doesn't match the lockfile.
       - name: Cache node_modules
         id: node-modules
         if: ${{ inputs.cache-node-modules && inputs.install-command != '' }}
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
-          path: "**/node_modules"
-          key: node-modules-${{ runner.os }}-node${{ inputs.node-version }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          path: |
+            **/node_modules
+            !**/.vercel/**
+          key: node-modules-v2-${{ runner.os }}-node${{ inputs.node-version }}-${{ hashFiles('**/pnpm-lock.yaml') }}
 
       - name: Install dependencies
         if: ${{ inputs.install-command != '' && steps.node-modules.outputs.cache-hit != 'true' }}
