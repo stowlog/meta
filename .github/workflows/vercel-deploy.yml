@@ -138,7 +138,7 @@ jobs:
       - name: Cache node_modules
         id: node-modules
         if: ${{ inputs.cache-node-modules && inputs.install-command != '' }}
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: "**/node_modules"
           key: node-modules-${{ runner.os }}-node${{ inputs.node-version }}-${{ hashFiles('**/pnpm-lock.yaml') }}
