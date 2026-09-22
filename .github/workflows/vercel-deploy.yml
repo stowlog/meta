@@ -31,6 +31,14 @@ on:
         description: Version of the Vercel CLI to install
         type: string
         default: "latest"
+      cache-node-modules:
+        description: |
+          Cache node_modules between runs, keyed on the lockfile. Opt-in: the key
+          does not cover the install command, so callers that vary it (or that
+          install outside the lockfile, e.g. from a registry that serves floating
+          versions) should leave this off.
+        type: boolean
+        default: false
       deploy-args:
         description: Extra args appended to 'vercel deploy'
         type: string
@@ -80,6 +88,8 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # A hung `vercel build`/`vercel deploy` otherwise sits on GitHub's 6h default.
+    timeout-minutes: 15
     environment:
       name: ${{ inputs.github-environment || inputs.environment }}
       url: ${{ steps.deploy.outputs.url }}
@@ -122,8 +132,19 @@ jobs:
           node-version: ${{ inputs.node-version }}
           cache: pnpm
 
+      # Globbed so pnpm workspaces get their per-package node_modules too, not
+      # just the root one. No restore-keys: a partial restore would leave a
+      # node_modules tree that doesn't match the lockfile.
+      - name: Cache node_modules
+        id: node-modules
+        if: ${{ inputs.cache-node-modules && inputs.install-command != '' }}
+        uses: actions/cache@v4
+        with:
+          path: "**/node_modules"
+          key: node-modules-${{ runner.os }}-node${{ inputs.node-version }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+
       - name: Install dependencies
-        if: ${{ inputs.install-command != '' }}
+        if: ${{ inputs.install-command != '' && steps.node-modules.outputs.cache-hit != 'true' }}
         run: ${{ inputs.install-command }}
 
       - name: Install Vercel CLI
