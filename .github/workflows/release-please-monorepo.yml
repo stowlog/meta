@@ -72,6 +72,11 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: ${{ inputs.node-version }}
+          # v5 turns on package-manager caching by itself whenever package.json
+          # declares "packageManager". For pnpm that runs before the next step
+          # installs pnpm, and fails with "Unable to locate executable file: pnpm".
+          # The pnpm store is cached explicitly below, so this cache is redundant.
+          package-manager-cache: false
           # No registry-url on purpose: it writes an .npmrc with
           # _authToken=${NODE_AUTH_TOKEN}, and with OIDC there is no such token.
           # The unresolved placeholder is sent as a literal bearer token and the
